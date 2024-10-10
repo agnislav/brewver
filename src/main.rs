@@ -8,7 +8,6 @@ use log::LevelFilter;
 use std::env;
 
 fn main() {
-    // Initialize the logger with a default level of `info`
     env_logger::Builder::from_env(env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
         .filter(None, LevelFilter::Info)
         .init();
@@ -111,7 +110,7 @@ impl Formula {
     fn download(&mut self) -> Result<&mut Self, Box<dyn std::error::Error>> {
         let client = reqwest::blocking::Client::new();
         let response = client.get(self.url.clone().unwrap())
-            .header("User-Agent", USER_AGENT)
+            .header("User-Agent", "BrewVer/0.1")
             .send()?;
 
         let file_content = response.text()?;
@@ -153,8 +152,6 @@ impl Formula {
         Ok(output)
     }
 }
-
-const USER_AGENT: &str = "homebrew_install_version";
 
 fn format_gh_api_commits_url(file_path: &str) -> String {
     format!("https://api.github.com/repos/Homebrew/homebrew-core/commits?path={}&per_page=100", file_path)
