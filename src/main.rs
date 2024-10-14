@@ -4,16 +4,26 @@ use clap::Parser;
 use clap_derive::Parser;
 use tempfile::{Builder, NamedTempFile, TempDir};
 use log::{info, debug, error};
-use log::LevelFilter;
-use std::env;
 
 fn main() {
-    env_logger::Builder::from_env(env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()))
-        .filter(None, LevelFilter::Info)
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .init();
+
+    show_github_token_info();
 
     let args = Args::parse();
     Formula::new(args.formula_name, args.formula_version).init();
+}
+
+fn show_github_token_info() {
+    if std::env::var("GITHUB_TOKEN").is_ok() {
+        info!("Personal Access Token is used.");
+    } else {
+        info!("This program uses the GitHub API to fetch data. To increase the rate limit, you can set a GITHUB_TOKEN environment variable.");
+        info!("To set the GITHUB_TOKEN, use the following command in your terminal:");
+        info!("export GITHUB_TOKEN=your_personal_access_token");
+        info!("You can create a personal access token at https://github.com/settings/tokens");
+    }
 }
 
 #[derive(Parser)]
@@ -71,15 +81,13 @@ impl Formula {
 
     fn get_commit_hash(&mut self) -> Result<&mut Self, Box<dyn std::error::Error>> {
         info!("Looking for {}@{}", self.name, self.version);
-        let client = reqwest::blocking::Client::new();
         
         for file_path in get_file_path(&self.name) {
             let url = format_gh_api_commits_url(&file_path);
             debug!("URL: {:?}", &url);
 
-            let response = client.get(&url)
-                .header("User-Agent", USER_AGENT)
-                .send()?;
+            let request = create_client(&url);
+            let response = request.send()?;
 
             let json: serde_json::Value = response.json()?;
 
@@ -108,11 +116,8 @@ impl Formula {
     }
 
     fn download(&mut self) -> Result<&mut Self, Box<dyn std::error::Error>> {
-        let client = reqwest::blocking::Client::new();
-        let response = client.get(self.url.clone().unwrap())
-            .header("User-Agent", "BrewVer/0.1")
-            .send()?;
-
+        let request = create_client(self.url.as_ref().unwrap());
+        let response = request.send()?;
         let file_content = response.text()?;
 
         // create temp file
@@ -120,7 +125,7 @@ impl Formula {
         let mut temp_file = Builder::new()
             .prefix(&self.name)
             .suffix(".rb")
-            .rand_bytes(8)
+            .rand_bytes(0)
             .tempfile_in(tmp_dir.path())?;
 
         debug!("Temp File: {:?}", &temp_file.path());
@@ -153,6 +158,18 @@ impl Formula {
     }
 }
 
+fn create_client(url: &str) -> reqwest::blocking::RequestBuilder {
+    let client = reqwest::blocking::Client::new();
+    let mut request_builder = client.get(url)
+        .header("User-Agent", "BrewVer/0.1");
+
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        request_builder = request_builder.header("Authorization", format!("Bearer {}", token));
+    }
+
+    request_builder
+}
+
 fn format_gh_api_commits_url(file_path: &str) -> String {
     format!("https://api.github.com/repos/Homebrew/homebrew-core/commits?path={}&per_page=100", file_path)
 }
@@ -164,7 +181,7 @@ fn format_gh_api_raw_file_url(commit: &str, file_path: &str) -> String {
 fn get_file_path(name: &str) -> [String; 2] {
     let first_letter = name.chars().next().unwrap();
     [
-        format!("/Formula/{}.rb", name),
         format!("/Formula/{}/{}.rb", first_letter, name),
+        format!("/Formula/{}.rb", name),
     ]
 }
